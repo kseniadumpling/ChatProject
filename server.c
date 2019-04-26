@@ -1,7 +1,7 @@
 #include "header.h"
 
 
-void *get_in_addr(struct sockaddr *sa){
+static void *get_in_addr(struct sockaddr *sa){
     if(sa->sa_family == AF_INET){
         return &(((struct sockaddr_in*)sa)->sin_addr);
     }
@@ -86,18 +86,22 @@ int main(){
     }
     
     //Open database
-    sqlite3 *dbUsers;
+    sqlite3 *db_users;
     char *err_msg = 0;
-    int handleUsers = sqlite3_open("users.db", &dbUsers);
-    if (handleUsers != SQLITE_OK){
-        fprintf(stderr, "Cannot open database: %s\n", sqlite3_errmsg(dbUsers));
-        sqlite3_close(dbUsers);
+    int handle_db_users = sqlite3_open("users.db", &db_users);
+    if (handle_db_users != SQLITE_OK){
+        fprintf(stderr, "Cannot open database: %s\n", sqlite3_errmsg(db_users));
+        sqlite3_close(db_users);
     }
     //Execution of creating table
     char *sql = "CREATE TABLE IF NOT EXISTS users(login TEXT, password TEXT);" ; // INSERT INTO users VALUES('admin', 'admin');
-    handleUsers = sqlite3_exec(dbUsers, sql, 0, 0, &err_msg); 
+    handle_db_users = sqlite3_exec(db_users, sql, 0, 0, &err_msg); 
+    if (handle_db_users != SQLITE_OK){
+        fprintf(stderr, "SQL error: %s\n", err_msg);
+        sqlite3_close(db_users);
+    }
 
-    //clsock = all clients' sockets
+    //Array clsock = all clients' sockets
     int clsock[MAX_CONNECT];
     for (int i = 0; i < MAX_CONNECT; i++) {
         clsock[i] = -1;
@@ -194,7 +198,7 @@ int main(){
                 }
                 //Main part - protocol
                 else if (evlist[i].events & EPOLLIN) {
-                    protocol_server(evlist[i].data.fd, clsock, clstates, buf, msg);
+                    protocol_server(evlist[i].data.fd, clsock, clstates, db_users, buf, msg);
                 } 
             }
         }

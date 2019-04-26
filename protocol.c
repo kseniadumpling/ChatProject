@@ -27,7 +27,7 @@ state_status get_cmd_type(char *cmdargs) {
 }
 
 void protocol_server(int active_socket, int *clsockets, state_machine *clstates,
-                        char *buf, char *msg) {
+                       sqlite3 *db_users, char *buf, char *msg) {
     memset(buf, '\0', MAX_DATA_SIZE);
     memset(msg, '\0', MAX_DATA_SIZE);
     int index;
@@ -89,7 +89,7 @@ void protocol_server(int active_socket, int *clsockets, state_machine *clstates,
              * (ввести правила, что логин начинается с букв,
              *  красиво было бы прикрутить регулярные выражение)
              */
-
+            
             printf("New login %d: %s", active_socket, buf);
             /* INSERT;
                 DB                            
@@ -215,8 +215,14 @@ void protocol_server(int active_socket, int *clsockets, state_machine *clstates,
                         continue;
                     }
                     else {
-                        if (send(clsockets[j], msg, MAX_DATA_SIZE-1, 0) == -1){
-                            perror("Error. Server: send()");
+                        if (clstates[j].state != STATE_START && 
+                            clstates[j].state != STATE_LOGIN &&
+                            clstates[j].state != STATE_PASSWORD &&
+                            clstates[j].state != STATE_SIGNUP && 
+                            clstates[j].state != STATE_SIGNUP_PASS) {
+                            if (send(clsockets[j], msg, MAX_DATA_SIZE-1, 0) == -1){
+                                perror("Error. Server: send()");
+                            }
                         }
                     }
                 } 

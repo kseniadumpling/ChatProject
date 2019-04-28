@@ -24,12 +24,6 @@
 #define MAX_CONNECT 100
 #define MAX_DATA_SIZE 256
 
-/*
- * ПЕРЕОПРЕДЕЛИТЬ READ
- * ВВОД ДО ЗАКРЫВАЮЩЕГО СИМВОЛА
- * 
- */
-
 typedef enum STATE {
   STATE_UNKNOWN = -1, STATE_START, STATE_LOGIN, STATE_PASSWORD, 
   STATE_SIGNUP, STATE_SIGNUP_PASS, STATE_COMMONROOM, STATE_HELP,
@@ -44,4 +38,4 @@ typedef struct state_machine{
 
 state_status get_cmd_type(char *cmd);
 void protocol_server(int sendingSockfd, int *clsock, state_machine *states,
-                 char *buf, char *msg);
+                 sqlite3 *db, char *buf, char *msg);

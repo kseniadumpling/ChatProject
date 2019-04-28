@@ -26,41 +26,52 @@ state_status get_cmd_type(char *cmdargs) {
     return STATE_UNKNOWN;
 }
 
+
 void protocol_server(int active_socket, int *clsockets, state_machine *clstates,
                        sqlite3 *db_users, char *buf, char *msg) {
+
     memset(buf, '\0', MAX_DATA_SIZE);
     memset(msg, '\0', MAX_DATA_SIZE);
     int index;
+
     // Finding right index
     for (index = 0; index < MAX_CONNECT; index++) {
         if (clstates[index].sockfd == active_socket){
             break;
         }
     }
+
+    // Main logic: 
     switch (clstates[index].state){
         case STATE_START:
             if (recv(active_socket, buf, MAX_DATA_SIZE-1, 0) == -1){
                 perror("Error. Server: recv()");
+                break;
             }
             printf("%d: %s", active_socket, buf);
+            
+            // if msg is command
             if (strncmp(buf, "/", 1) == 0){
                 clstates[index].state = get_cmd_type(buf);
-                if (clstates[index].state == -1){
+                // Unknown cmd
+                if(clstates[index].state == -1){
                     printf("%d: Unknown command\n", active_socket);
                     sprintf(msg, "Unknown command. Please, type /signup or /login\t");
-                    if(send(active_socket, msg, MAX_DATA_SIZE-1, 0) == -1){
+                    if (send(active_socket, msg, MAX_DATA_SIZE-1, 0) == -1){
                         perror("Error. Server: send()");
                     }
                     clstates[index].state = STATE_START;
                 }
+                // Login cmd
                 else if (clstates[index].state  == STATE_LOGIN){ 
                     sprintf(msg, "\nPlease, write login:\t");
-                    if(send(active_socket, msg, MAX_DATA_SIZE-1, 0) == -1){
+                    if (send(active_socket, msg, MAX_DATA_SIZE-1, 0) == -1){
                         perror("Error. Server: send()");
                     }
                     clstates[index].state = STATE_LOGIN;
                 }
-                else if (clstates[index].state  == STATE_SIGNUP){
+                // Sign up cmd
+                else if(clstates[index].state  == STATE_SIGNUP){
                     sprintf(msg, "\nPlease, create new login:\t");
                     if(send(active_socket, msg, MAX_DATA_SIZE-1, 0) == -1){
                         perror("Error. Server: send()");
@@ -68,6 +79,7 @@ void protocol_server(int active_socket, int *clsockets, state_machine *clstates,
                     clstates[index].state = STATE_SIGNUP;
                 }
             }
+            // just regular msg
             else {
                 printf("%d: undefined user.\n", active_socket);
                 sprintf(msg, "Please, sign up or log in\t");
@@ -78,6 +90,7 @@ void protocol_server(int active_socket, int *clsockets, state_machine *clstates,
             break; 
             /* End of case START */
         
+
         case STATE_SIGNUP:
             if (recv(active_socket, buf, MAX_DATA_SIZE-1, 0) == -1){
                 perror("Error. Server: recv()");
@@ -85,15 +98,22 @@ void protocol_server(int active_socket, int *clsockets, state_machine *clstates,
             }
 
             /*
-             * Проверка на корректность введенного логина
-             * (ввести правила, что логин начинается с букв,
-             *  красиво было бы прикрутить регулярные выражение)
+             * TODO: Think about regular expression
              */
             
             printf("New login %d: %s", active_socket, buf);
-            /* INSERT;
-                DB                            
-            */
+
+            // Executing insertion to table
+            char *err_msg;
+            char *sql;
+            sprintf(sql, "INSERT INTO users (login, password) VALUES ('%s', 'undefine');", buf) ; 
+            int handle = sqlite3_exec(db_users, sql, 0, 0, &err_msg); 
+            if (handle != SQLITE_OK){
+                fprintf(stderr, "SQL error: %s\n", err_msg);
+                //sqlite3_close(db_users);
+                break;
+            }
+
             sprintf(msg, "Please, create password:\t");
             if (send(active_socket, msg, MAX_DATA_SIZE-1, 0) == -1){
                 perror("Error. Srever: send()");
@@ -102,6 +122,7 @@ void protocol_server(int active_socket, int *clsockets, state_machine *clstates,
             clstates[index].state = STATE_SIGNUP_PASS;
             break;
             /* End of case STATE_SIGNUP */
+
 
         case STATE_SIGNUP_PASS:
             if (recv(active_socket, buf, MAX_DATA_SIZE-1, 0) == -1){
@@ -177,7 +198,7 @@ void protocol_server(int active_socket, int *clsockets, state_machine *clstates,
                 clstates[index].state = get_cmd_type(buf);
                 if (clstates[index].state == -1){
                     sprintf(msg, "Unknown command ");
-                    printf("\n%s", msg);
+                    printf("%d: %s\n", active_socket, msg);
                     if (send(active_socket, msg, MAX_DATA_SIZE-1, 0) == -1){
                         perror("Error. Server: send()");
                     }

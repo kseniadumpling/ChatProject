@@ -58,6 +58,9 @@ int connect_to_server(char *argv[]){
         break;
     }
 
+    // Don't need anymore
+    freeaddrinfo(servinfo); 
+
     // Checking founded connection
     if (ptr == NULL){
         printf("Failed to connect\n");
@@ -69,9 +72,6 @@ int connect_to_server(char *argv[]){
     inet_ntop(ptr->ai_family, get_in_addr((struct sockaddr *)ptr->ai_addr), str, sizeof str);
     printf("Client: connecting to %s\n", str);
 
-    // Don't need anymore
-    freeaddrinfo(servinfo); 
-
     return sockfd; 
 }
 
@@ -80,13 +80,14 @@ int connect_to_server(char *argv[]){
  * Func of tuning epoll
  * Returning: epollfd in correct case, -1 in error case
  */
-int configure_epoll(int sockfd, int pipefd[2]){
+int configure_epollfd(int sockfd, int pipefd[2]){
     struct epoll_event ev;
     int epollfd;
 
     epollfd = epoll_create1(0);
     if (epollfd == -1){
         perror("Error. Client: epoll_create1()");
+        return -1;
     }
 
     ev.events = EPOLLIN | EPOLLOUT | EPOLLET; // EPOLLET - edge-triggered
@@ -137,7 +138,7 @@ int main(int argc, char *argv[]) {
     int epollfd;
     struct epoll_event evpipe[2];
 
-    if ((epollfd = configure_epoll(sockfd, pipefd)) == -1){
+    if ((epollfd = configure_epollfd(sockfd, pipefd)) == -1){
         printf("Please, restart client.\n");
         exit(1);
     }

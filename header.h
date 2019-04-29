@@ -33,9 +33,12 @@ typedef enum STATE {
 typedef struct state_machine{
   state_status state;
   int sockfd;
+  char login[MAX_DATA_SIZE];
 } state_machine;
 
 
 state_status get_cmd_type(char *cmd);
 void protocol_server(int sendingSockfd, int *clsock, state_machine *states,
                  sqlite3 *db, char *buf, char *msg);
+
+int execute_db(sqlite3 *db_ptr, char *name, char *sql); 

@@ -80,7 +80,7 @@ int connect_to_server(char *argv[]){
  * Func of tuning epoll
  * Returning: epollfd in correct case, -1 in error case
  */
-int configure_epollfd(int sockfd, int pipefd[2]){
+int configure_epollfd(int sockfd){
     struct epoll_event ev;
     int epollfd;
 
@@ -100,10 +100,11 @@ int configure_epollfd(int sockfd, int pipefd[2]){
         return -1;
     }
 
-    // Linking pipe & epoll
-    ev.data.fd = pipefd[0];
-    if (epoll_ctl(epollfd, EPOLL_CTL_ADD, pipefd[0], &ev) == -1){
-        perror("Error. Client: epoll_ctl: pipefd");
+    //
+    ev.data.fd = 0;
+    if (epoll_ctl(epollfd, EPOLL_CTL_ADD, 0, &ev) == -1){
+        perror("Error. Client: epoll_ctl: Zero sock");
+        close(sockfd);
         return -1;
     }
 
@@ -136,73 +137,50 @@ int main(int argc, char *argv[]) {
 
     // Epoll tuning
     int epollfd;
-    struct epoll_event evpipe[2];
+    struct epoll_event evlist[2];
 
-    if ((epollfd = configure_epollfd(sockfd, pipefd)) == -1){
+    if ((epollfd = configure_epollfd(sockfd)) == -1){
         printf("Please, restart client.\n");
         exit(1);
     }
 
-    //Fork: parent - listen of inputs from server and child, 
-    //      child  - waiting for client input
-    pid_t pid;
-    pid = fork();
-    if (pid == -1){
-        perror("Error. Client: Fork");
-        exit(1);
-    }
-
-    int working = 1;
     int res;
     int nfds; // number of file descriptors
+    int working = 1;
 
-    if (pid == 0){
-        // child - waiting for client input, sending to pipefd[1]
-        close(pipefd[0]);
-        while(working){
-            memset(buf, 0, MAX_DATA_SIZE);
-            fgets(buf, MAX_DATA_SIZE-1, stdin);
-            if (write(pipefd[1], buf, MAX_DATA_SIZE-1) == -1){
-                perror("Error. Client: send");
-            }
+    while (working){
+        nfds = epoll_wait(epollfd, evlist, 2, -1); 
+        if (nfds == -1){
+            perror("Error. Client: epoll_wait()");
+            break;
         }
-    }
-    else {
-        // parent - listen of inputs from server and child
-        close(pipefd[1]);
-        while (working){
-            nfds = epoll_wait(epollfd, evpipe, 2, -1); 
-            if (nfds == -1){
-                perror("Error. Client: epoll_wait()");
-                break;
-            }
-            for (int i = 0; i < nfds; i++){
-                memset(buf, '\0', MAX_DATA_SIZE);
-                // if server send smth:
-                if (evpipe[i].data.fd == sockfd){
-                    res = recv(sockfd, buf, MAX_DATA_SIZE-1, 0);
-                    if (res == -1){
-                        perror("Error. Client: recv()");
-                        exit(1); 
-                    }
-                    else if (res == 0){
-                        close(sockfd);
-                        working = 0;
-                        printf("Server closed connection: socket %d.\n",sockfd);
-                    }
-                    else {
-                        printf("%s\n", buf);
-                    }
-
+        for (int i = 0; i < nfds; i++){
+            memset(buf, '\0', MAX_DATA_SIZE);
+            // if server send smth:
+            if (evlist[i].data.fd == sockfd){
+                res = recv(sockfd, buf, MAX_DATA_SIZE-1, 0);
+                if (res == -1){
+                    perror("Error. Client: recv()");
+                    exit(1); 
                 }
-                // if client send smth
+                else if (res == 0){
+                    close(sockfd);
+                    printf("Server closed connection: socket %d.\n",sockfd);
+                }
                 else {
-                    res = read(evpipe[i].data.fd, buf, MAX_DATA_SIZE-1);
-                    if (res == -1){
-                        perror("Error. Client: read()");
-                        //exit(1);
-                    }
-                    else if (res == 0){
+                    printf("%s\n", buf);
+                }
+
+            }
+            // if client send smth
+            else {
+                res = read(0, buf, MAX_DATA_SIZE-1);
+                if (res == -1){
+                    perror("Error. Client: read()");
+                    //exit(1);
+                }
+                else {
+                    if (strncmp(buf, "/exit", 5) == 0){
                         working = 0;
                     }
                     else {
@@ -217,13 +195,7 @@ int main(int argc, char *argv[]) {
     }
 
     // Finishing
-    if (pid != 0){
-        close(pipefd[0]);
-        close(sockfd);
-    }
-    else {
-        close(pipefd[1]);
-    }
+    close(sockfd);
 
     return 0;
 }

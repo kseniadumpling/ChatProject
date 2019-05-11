@@ -137,16 +137,12 @@ int main(){
         fprintf(stderr, "SQL error: %s\n", err_msg);
         sqlite3_close(db_users);
     }
-    
-    
-    // All future clients' sockets
-    int clsock[MAX_CONNECT];
-    for (int i = 0; i < MAX_CONNECT; i++) {
-        clsock[i] = -1;
-    }
 
     // All future clients' states
     state_machine clstates[MAX_CONNECT];
+    for (int i = 0; i < MAX_CONNECT; i++) {
+        clstates[i].sockfd = -1;
+    }
 
     struct epoll_event evlist[MAX_EVENTS];
     int nfds; //number of file descriptors
@@ -166,50 +162,50 @@ int main(){
                 // Accepting connection for the first possible
                 int index;
                 for (index = 0; index < MAX_CONNECT; index++){
-                    if (clsock[index] == -1){
-                        clsock[index] = accept(sockfd, (struct sockaddr *)&their_addr, &sin_size);
+                    if (clstates[index].sockfd == -1){
+                        clstates[index].sockfd = accept(sockfd, (struct sockaddr *)&their_addr, &sin_size);
                         inet_ntop(their_addr.ss_family, get_in_addr((struct sockaddr *)&their_addr), str, sizeof str);                       
-                        printf("%d has been connected from %s.\n", clsock[index], str);
+                        printf("%d has been connected from %s.\n", clstates[index].sockfd, str);
                         break;
                     }
                 }
-                if (clsock[index] == -1){
+                if (clstates[index].sockfd == -1){
                     perror("Error. Server: accept()");
                     break;
                 }
 
-                setnonblocking(clsock[index]);
+                setnonblocking(clstates[index].sockfd);
                 
-                ev.data.fd = clsock[index];
-                if (epoll_ctl(epollfd, EPOLL_CTL_ADD, clsock[index], &ev) == -1){
-                    perror("Error. Server: epoll_ctl() - clsock");
+                ev.data.fd = clstates[index].sockfd;
+                if (epoll_ctl(epollfd, EPOLL_CTL_ADD, clstates[index].sockfd, &ev) == -1){
+                    perror("Error. Server: epoll_ctl() add");
                     break;
                 }
 
                 clstates[index].state = STATE_START;
-                clstates[index].sockfd = clsock[index];
-                clstates[index].login = "undefined";
+                clstates[index].sockfd = clstates[index].sockfd;
+                strcpy(clstates[index].login, "undefined");
 
                 // Notifications: 
                 char greet[256];
-                sprintf(greet,"Connected.\nYour id is %d.\nMembers' id online: ", clsock[index]);
+                sprintf(greet,"Connected.\nYour id is %d.\nMembers' id online: ", clstates[index].sockfd);
                 char notify[256];
-				sprintf(notify, "%d joined.\n", clsock[index]);
+				sprintf(notify, "%d joined.\n", clstates[index].sockfd);
 				for (int j = 0; j < MAX_CONNECT; j++) {
                     // TODO: rewrite, using info from DB
 
                     // Adding all of IDs to string 
-					if (clsock[j] > 0) {
-						sprintf(greet, "%s %d",greet, clsock[j]);
+					if (clstates[j].sockfd > 0) {
+						sprintf(greet, "%s %d",greet, clstates[j].sockfd);
 					}
                     // Sending notification to other clients
-                    if (clsock[j] > 0 && j != index){
-                        send(clsock[j], notify, strlen(notify), 0);
+                    if (clstates[j].sockfd > 0 && j != index){
+                        send(clstates[j].sockfd, notify, strlen(notify), 0);
                     }
 				}
                 // Sending info 
 				sprintf(greet, "%s\n\nType /signup or /login to continue...\t", greet); // kinda к о с т ы л ь
-				if (send(clsock[index], greet, strlen(greet), 0) == -1){
+				if (send(clstates[index].sockfd, greet, strlen(greet), 0) == -1){
                      perror("Error. Server: send()");
                 }
             }
@@ -218,7 +214,7 @@ int main(){
             else {
                 //Checking lost connection
                 if (evlist[i].events & EPOLLRDHUP) {
-                    printf("Clinent %d disconnected.\n", evlist[i].data.fd);
+                    printf("Client %d disconnected.\n", evlist[i].data.fd);
                     if (epoll_ctl(epollfd, EPOLL_CTL_DEL, evlist[i].data.fd, 0) == -1){
                         perror("Error. Server: epoll_ctl() - del");
                         exit(1);
@@ -229,21 +225,21 @@ int main(){
 					sprintf(notify, "%d left.\n",evlist[i].data.fd);
                     for (int j = 0; j < MAX_CONNECT; j++){
                         // Closing if it's sock of client that has left 
-                        if (clsock[j]== evlist[i].data.fd){
-                            clsock[j] = -1;
+                        if (clstates[j].sockfd== evlist[i].data.fd){
+                            clstates[j].sockfd = -1;
                             if (close(evlist[i].data.fd) == -1){
                                 perror("Error. Server: close()");
                             }
                         }
                         // Sending notification if it's other sockets
-                        else if (clsock[j] > 0){
-                            send(clsock[j], notify, strlen(notify), 0);
+                        else if (clstates[j].sockfd > 0){
+                            send(clstates[j].sockfd, notify, strlen(notify), 0);
                         }
                     }
                 }
                 //Main part - protocol
                 else if (evlist[i].events & EPOLLIN) {
-                    protocol_server(evlist[i].data.fd, clsock, clstates, db_users, buf, msg);
+                    protocol_server(evlist[i].data.fd, clstates, db_users);
                 } 
             }
         }

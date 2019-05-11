@@ -2,26 +2,26 @@
 
 
 state_status get_cmd_type(char *cmdargs) {
-    if (strncmp(cmdargs, "/login", 6) == 0)
+    if (strncmp(cmdargs, "/login", strlen("/login")) == 0)
         return STATE_LOGIN;
 
-    if (strncmp(cmdargs, "/signup", 7) == 0)
+    if (strncmp(cmdargs, "/signup", strlen("/signup")) == 0)
         return STATE_SIGNUP;
 
-    if (strncmp(cmdargs, "/help", 5) == 0)
+    if (strncmp(cmdargs, "/help", strlen("/help")) == 0)
         return STATE_HELP;
 
-    if (strncmp(cmdargs, "/list", 5) == 0)
+    if (strncmp(cmdargs, "/list", strlen("/list")) == 0)
         return STATE_LIST;
 
-    if (strncmp(cmdargs, "/connect", 8) == 0)
+    if (strncmp(cmdargs, "/connect", strlen("/connect")) == 0)
         return STATE_CONNECT;
 
-    if (strncmp(cmdargs, "/logout", 7) == 0)
+    if (strncmp(cmdargs, "/logout", strlen("/logout")) == 0)
         return STATE_LOGOUT;
 
-    if (strncmp(cmdargs, "/exit", 5) == 0)
-        return STATE_EXIT;
+    if (strncmp(cmdargs, "/quit", strlen("/quit")) == 0)
+        return STATE_QUIT;
 
     return STATE_UNKNOWN;
 }
@@ -53,11 +53,10 @@ int execute_db(sqlite3 *db_ptr, char *name, char *sql){
 }
 
 
-void protocol_server(int active_socket, int *clsockets, state_machine *clstates,
-                       sqlite3 *db_users, char *buf, char *msg) {
+void protocol_server(int active_socket, state_machine *clstates, sqlite3 *db_users) {
 
-    memset(buf, '\0', MAX_DATA_SIZE);
-    memset(msg, '\0', MAX_DATA_SIZE);
+    char buf[MAX_DATA_SIZE] = "\0";
+    char msg[MAX_DATA_SIZE] = "\0";
 
     // Finding right index
     int index;
@@ -78,7 +77,7 @@ void protocol_server(int active_socket, int *clsockets, state_machine *clstates,
             printf("%d: %s", active_socket, buf);
             
             // if msg is command
-            if (strncmp(buf, "/", 1) == 0){
+            if (!strncmp(buf, "/", 1)){
                 clstates[index].state = get_cmd_type(buf);
                 // Unknown cmd
                 if(clstates[index].state == -1){
@@ -133,7 +132,7 @@ void protocol_server(int active_socket, int *clsockets, state_machine *clstates,
       
             sprintf(msg, "Please, create password:\t");
             if (send(active_socket, msg, MAX_DATA_SIZE-1, 0) == -1){
-                perror("Error. Srever: send()");
+                perror("Error. Server: send()");
                 break;
             }
             clstates[index].state = STATE_SIGNUP_PASS;
@@ -177,7 +176,7 @@ void protocol_server(int active_socket, int *clsockets, state_machine *clstates,
             printf("New profile created successfully\n");
             sprintf(msg, "Success! Welcome to the common room\n");
             if (send(active_socket, msg, MAX_DATA_SIZE-1, 0) == -1){
-                perror("Error. Srever: send()");
+                perror("Error. Server: send()");
                 break;
             }
             clstates[index].state = STATE_COMMONROOM;
@@ -270,10 +269,10 @@ void protocol_server(int active_socket, int *clsockets, state_machine *clstates,
                 sprintf(msg, "%d: %s", active_socket, buf);
                 printf("%s", msg);
                 for (int j = 0; j < MAX_CONNECT; j++){
-                    if (clsockets[j] == active_socket){
+                    if (clstates[j].sockfd== active_socket){
                         continue;
                     }
-                    else if (clsockets[j] == -1){
+                    else if (clstates[j].sockfd == -1){
                         continue;
                     }
                     else {
@@ -283,7 +282,7 @@ void protocol_server(int active_socket, int *clsockets, state_machine *clstates,
                             clstates[j].state != STATE_PASSWORD &&
                             clstates[j].state != STATE_SIGNUP && 
                             clstates[j].state != STATE_SIGNUP_PASS) {
-                            if (send(clsockets[j], msg, MAX_DATA_SIZE-1, 0) == -1){
+                            if (send(clstates[j].sockfd, msg, MAX_DATA_SIZE-1, 0) == -1){
                                 perror("Error. Server: send()");
                             }
                         }
@@ -302,7 +301,7 @@ void protocol_server(int active_socket, int *clsockets, state_machine *clstates,
         case STATE_CHATROOM:
             break;
 
-        case STATE_EXIT:
+        case STATE_QUIT:
             break;
 
         case STATE_LOGOUT:

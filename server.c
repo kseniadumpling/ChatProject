@@ -30,7 +30,7 @@ int configure_sockfd(char *str){
     hints.ai_socktype = SOCK_STREAM; // TCP stream-sockets
     hints.ai_flags = AI_PASSIVE;
 
-    // Fill the hints and add info about host in da servinfo
+    // Fill the hints and add info about host in da sefrvinfo
     int status = getaddrinfo(NULL, PORT, &hints, &servinfo);
     if (status != 0) { 
         printf("Error. getaddrinfo(): %s\n", gai_strerror(status)); 
@@ -74,6 +74,7 @@ int configure_sockfd(char *str){
 }
 
 int main(){
+
     int sockfd;
     char str[INET6_ADDRSTRLEN]; //Используется в inet_ntop()
     struct sockaddr_storage their_addr;
@@ -83,10 +84,6 @@ int main(){
         printf("\nPlease, restart server.\n");
         exit(1);
     }
-
-    char buf[MAX_DATA_SIZE] = "Hello, World!";
-    char msg[MAX_DATA_SIZE] = "Msg for World!";
-
 
     //Epoll tuning
     int epollfd;
@@ -103,25 +100,6 @@ int main(){
         exit(1);
     }
 
-    /*  Here goes segmentation fault. 
-        Check sqlite.org/cintro.html, 
-        mb answer will be there
-
-    sqlite3 *db_users;
-    char *sql = "CREATE TABLE IF NOT EXISTS users(login TEXT, password TEXT);" ;
-    if (execute_db(db_users, "users.db", sql) == -1){
-        printf("Error with database users.db\n");
-        exit(1);
-    } 
-    */ 
-
-    /*
-     * TODO: Rewrite this part (working with DB). 
-     *       There is a great field for bugs coz database 
-     *       will never be closed. This code only for 
-     *       testing some func in the protocol
-     */
-
     // Open database
     sqlite3 *db_users;
     char *err_msg = 0;
@@ -129,16 +107,22 @@ int main(){
     if (handle_db_users != SQLITE_OK){
         fprintf(stderr, "Cannot open database: %s\n", sqlite3_errmsg(db_users));
         sqlite3_close(db_users);
+        exit(1);
     }
+
     // Execution of creating table
     char *sql = "CREATE TABLE IF NOT EXISTS users(login TEXT, password TEXT);";
     handle_db_users = sqlite3_exec(db_users, sql, 0, 0, &err_msg); 
     if (handle_db_users != SQLITE_OK){
         fprintf(stderr, "SQL error: %s\n", err_msg);
         sqlite3_close(db_users);
+        exit(1);
     }
-
+    
     // All future clients' states
+
+    // ALTERNATIVE (check it):
+    // state_machine clstates = (state_machine*) malloc(MAX_CONNECT * sizeof(state_machine));
     state_machine clstates[MAX_CONNECT];
     for (int i = 0; i < MAX_CONNECT; i++) {
         clstates[i].sockfd = -1;
@@ -147,6 +131,10 @@ int main(){
     struct epoll_event evlist[MAX_EVENTS];
     int nfds; //number of file descriptors
 
+    node *commonroomList = NULL;
+    node *alpharoomList = NULL;
+    
+    
     // Main loop
     while(1){
 
@@ -184,49 +172,45 @@ int main(){
 
                 clstates[index].state = STATE_START;
                 clstates[index].sockfd = clstates[index].sockfd;
-                strcpy(clstates[index].login, "undefined");
+                strcpy(clstates[index].login, "\0");
 
                 // Notifications: 
-                char greet[256];
-                sprintf(greet,"Connected.\nYour id is %d.\nMembers' id online: ", clstates[index].sockfd);
-                char notify[256];
-				sprintf(notify, "%d joined.\n", clstates[index].sockfd);
+                int count = 0;
+                char greet[256] = {'\0'};
 				for (int j = 0; j < MAX_CONNECT; j++) {
-                    // TODO: rewrite, using info from DB
-
-                    // Adding all of IDs to string 
+                    // Counting online members 
 					if (clstates[j].sockfd > 0) {
-						sprintf(greet, "%s %d",greet, clstates[j].sockfd);
+						count++;
 					}
-                    // Sending notification to other clients
-                    if (clstates[j].sockfd > 0 && j != index){
-                        send(clstates[j].sockfd, notify, strlen(notify), 0);
-                    }
 				}
                 // Sending info 
-				sprintf(greet, "%s\n\nType /signup or /login to continue...\t", greet); // kinda к о с т ы л ь
-				if (send(clstates[index].sockfd, greet, strlen(greet), 0) == -1){
+                // Online now: %d.\nType /signup or /login to continue...
+                sprintf(greet,"Connected.\nOnline now: %d.\nType /signup or /login to continue...\n", count);
+				if (write(clstates[index].sockfd, greet, strlen(greet)+1) == -1){
                      perror("Error. Server: send()");
                 }
             }
 
-            // if client has already connected
+            // if client has already connected%d.\n
             else {
                 //Checking lost connection
                 if (evlist[i].events & EPOLLRDHUP) {
-                    printf("Client %d disconnected.\n", evlist[i].data.fd);
                     if (epoll_ctl(epollfd, EPOLL_CTL_DEL, evlist[i].data.fd, 0) == -1){
                         perror("Error. Server: epoll_ctl() - del");
                         exit(1);
                     }
 
                     // Notifying about client that has left
-                    char notify[256];
-					sprintf(notify, "%d left.\n",evlist[i].data.fd);
+                    char notify[256] = {'\0'};
                     for (int j = 0; j < MAX_CONNECT; j++){
                         // Closing if it's sock of client that has left 
-                        if (clstates[j].sockfd== evlist[i].data.fd){
+                        if (clstates[j].sockfd == evlist[i].data.fd){
+                            printf("Client %s (sock %d) disconnected.\n", clstates[j].login, clstates[j].sockfd);
+                            delete_node(&commonroomList, clstates[j].sockfd);
+                            delete_node(&alpharoomList, clstates[j].sockfd);
                             clstates[j].sockfd = -1;
+                            sprintf(notify, "%s left.\n", clstates[j].login);
+                            memset(clstates[j].login, '\0', MAX_LOGIN_SIZE);
                             if (close(evlist[i].data.fd) == -1){
                                 perror("Error. Server: close()");
                             }
@@ -237,13 +221,14 @@ int main(){
                         }
                     }
                 }
-                //Main part - protocol
-                else if (evlist[i].events & EPOLLIN) {
-                    protocol_server(evlist[i].data.fd, clstates, db_users);
+                //Main part - protocol 
+                else if (evlist[i].events & EPOLLIN){   
+                    protocol_server(evlist[i].data.fd, clstates, db_users, &commonroomList, &alpharoomList);
                 } 
             }
         }
     }
+
     close(sockfd);
     close(epollfd);
     printf("\nFinishing server...\n");

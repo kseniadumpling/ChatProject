@@ -1,13 +1,16 @@
 all: server
 
-server: server.o protocol.o 
-	gcc server.o protocol.o -lsqlite3 -o server
+server: server.o protocol.o list.o 
+	gcc server.o protocol.o list.o -lsqlite3 -o server
 
 server.o: server.c
-	gcc -lsqlite3 -c server.c
+	gcc -g -Wall -lsqlite3 -c server.c
 
 protocol.o: protocol.c
-	gcc -lsqlite3 -c protocol.c
+	gcc -g -lsqlite3 -c protocol.c
+
+list.o: list.c
+	gcc -g -c list.c
 
 clean:
 	rm -rf *.o server

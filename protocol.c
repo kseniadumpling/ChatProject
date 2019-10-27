@@ -1,6 +1,5 @@
 #include "header.h"
 
-
 state_status get_cmd_type(char *cmdargs) {
     if (strncmp(cmdargs, "/login", strlen("/login")) == 0)
         return STATE_LOGIN;
@@ -11,49 +10,86 @@ state_status get_cmd_type(char *cmdargs) {
     if (strncmp(cmdargs, "/help", strlen("/help")) == 0)
         return STATE_HELP;
 
-    if (strncmp(cmdargs, "/list", strlen("/list")) == 0)
-        return STATE_LIST;
+    if (strncmp(cmdargs, "/roomlist", strlen("/roomlist")) == 0)
+        return STATE_ROOMLIST;
 
     if (strncmp(cmdargs, "/connect", strlen("/connect")) == 0)
-        return STATE_CONNECT;
+        return (get_room(cmdargs));
 
     if (strncmp(cmdargs, "/logout", strlen("/logout")) == 0)
         return STATE_LOGOUT;
 
-    if (strncmp(cmdargs, "/quit", strlen("/quit")) == 0)
-        return STATE_QUIT;
-
     return STATE_UNKNOWN;
 }
 
-/*
- * TODO: Fix it.
- */
-int execute_db(sqlite3 *db_ptr, char *name, char *sql){
-    // Opening database
-    char *err_msg = 0;
-    int handle = sqlite3_open(name, &db_ptr);
-    if (handle != SQLITE_OK){
-        printf("Cannot open database: %s\n", sqlite3_errmsg(db_ptr));
-        sqlite3_close(db_ptr);
-        return -1;
+state_status get_room(char *cmd){
+    char *temp;
+    temp = strtok(cmd, " ");
+    temp = strtok(NULL, " ");
+    if(temp == NULL){
+        return STATE_UNKNOWN;
     }
-    // Executing
-    handle = sqlite3_exec(db_ptr, sql, 0, 0, &err_msg); 
-    if (handle != SQLITE_OK){
-        printf("SQL error: %s\n", err_msg);
-        sqlite3_close(db_ptr);
-        return -1;
-    }
+    if (strncmp(temp, "common", strlen("common")) == 0)
+        return STATE_COMMONROOM;
 
-    // Closing.
-    sqlite3_close(db_ptr);
-    
-    return 0;
+    if (strncmp(temp, "alpha", strlen("alpha")) == 0)
+        return STATE_ALPHA;
+
+    if (strncmp(temp, "beta", strlen("beta")) == 0)
+        return STATE_BETA;
 }
 
+void state_unknown_info(int socket){
+    char msg[MAX_DATA_SIZE] = {"\0"};
+    printf("%d: Unknown command\n", socket);
+    sprintf(msg, "\nUnknown command.\n");
+    if (write(socket, msg, strlen(msg)+1) == -1){
+        perror("Error. Server: send()");
+    }
+}
 
-void protocol_server(int active_socket, state_machine *clstates, sqlite3 *db_users) {
+void state_help_info(int socket){
+    char msg[MAX_DATA_SIZE] = {"\0"};
+    sprintf(msg, "\nList of commands:\n/help - show this list\n" 
+                "/roomlist - list of all available chatrooms\n" 
+                "/connect <to> - connect to chatroom\n" 
+                "/logout - change the profile\n\n");
+    if (write(socket, msg, strlen(msg)+1) == -1){
+        perror("Error. Server: send()");
+    }
+}
+
+void state_roomlist_info(int socket){
+    char msg[MAX_DATA_SIZE] = {"\0"};
+    sprintf(msg, "\nList of available rooms:"
+            "\n1. common\n2. alpha\n\n");
+    if (write(socket, msg, strlen(msg)+1) == -1){
+        perror("Error. Server: send()");
+    }
+}
+
+void state_wrongcmd_info(int socket){
+    char msg[MAX_DATA_SIZE] = {"\0"};
+    sprintf(msg, "\nThis command is not available\n");
+    if (write(socket, msg, strlen(msg)+1) == -1){
+        perror("Error. Server: send()");
+    }
+}
+
+int is_authorization_state(state_status clstate){
+    if (clstate == STATE_START || 
+        clstate == STATE_LOGIN ||
+        clstate == STATE_PASSWORD ||
+        clstate == STATE_SIGNUP || 
+        clstate == STATE_SIGNUP_PASS){
+        return 0; // TODO: Add description
+    }
+    else {
+        return 1;
+    }  
+}
+
+void protocol_server(int active_socket, state_machine *clstates, sqlite3 *db_users, node **commonList, node **alphaList) {
 
     char buf[MAX_DATA_SIZE] = "\0";
     char msg[MAX_DATA_SIZE] = "\0";
@@ -74,42 +110,39 @@ void protocol_server(int active_socket, state_machine *clstates, sqlite3 *db_use
                 perror("Error. Server: recv()");
                 break;
             }
-            printf("%d: %s", active_socket, buf);
+            printf("sock %d: %s", active_socket, buf);
             
             // if msg is command
             if (!strncmp(buf, "/", 1)){
-                clstates[index].state = get_cmd_type(buf);
-                // Unknown cmd
-                if(clstates[index].state == -1){
-                    printf("%d: Unknown command\n", active_socket);
-                    sprintf(msg, "Unknown command. Please, type /signup or /login\t");
-                    if (send(active_socket, msg, MAX_DATA_SIZE-1, 0) == -1){
-                        perror("Error. Server: send()");
-                    }
-                    clstates[index].state = STATE_START;
-                }
-                // Login cmd
-                else if (clstates[index].state  == STATE_LOGIN){ 
-                    sprintf(msg, "\nPlease, write login:\t");
-                    if (send(active_socket, msg, MAX_DATA_SIZE-1, 0) == -1){
-                        perror("Error. Server: send()");
-                    }
-                    clstates[index].state = STATE_LOGIN;
-                }
-                // Sign up cmd
-                else if(clstates[index].state  == STATE_SIGNUP){
-                    sprintf(msg, "\nPlease, create new login:\t");
-                    if(send(active_socket, msg, MAX_DATA_SIZE-1, 0) == -1){
-                        perror("Error. Server: send()");
-                    }
-                    clstates[index].state = STATE_SIGNUP;
+                clstates[index].state = get_cmd_type(buf); // Get new state
+
+                switch (clstates[index].state){
+                    case STATE_LOGIN:
+                        sprintf(msg, "\nPlease, write login: ");
+                        if (write(active_socket, msg, strlen(msg)+1) == -1){
+                            perror("Error. Server: send()");
+                        }
+                        break;
+                    
+                    case STATE_SIGNUP:
+                        sprintf(msg, "\nPlease, create new login: ");
+                        if(write(active_socket, msg, strlen(msg)+1) == -1){
+                            perror("Error. Server: send()");
+                        }
+                        break;
+                    
+                    //all others command hide
+                    default:
+                        state_unknown_info(active_socket);
+                        clstates[index].state = STATE_START;
+                        break;
                 }
             }
             // just regular msg
             else {
-                printf("%d: undefined user.\n", active_socket);
-                sprintf(msg, "Please, sign up or log in\t");
-                if (send(active_socket, msg, MAX_DATA_SIZE-1, 0) == -1){
+                printf("sock %d: undefined user.\n", active_socket);
+                sprintf(msg, "\nPlease, sign up or log in\n");
+                if (write(active_socket, msg, strlen(msg)+1) == -1){
                     perror("Error. Server: send()");
                     break;
                 }
@@ -124,13 +157,13 @@ void protocol_server(int active_socket, state_machine *clstates, sqlite3 *db_use
                 break;
             }
             /*
-             * TODO: Think about regular expression
+             * TODO: Think about regular expression &
+             *       checking the already used one.
              */
-            printf("New login %d: %s", active_socket, buf);
-            strcpy(clstates[index].login, buf);
-       
+            printf("sock %d new login: %s", active_socket, buf);
+            strncpy(clstates[index].login, buf, strlen(buf)-1);
       
-            sprintf(msg, "Please, create password:\t");
+            sprintf(msg, "Please, create password: ");
             if (send(active_socket, msg, MAX_DATA_SIZE-1, 0) == -1){
                 perror("Error. Server: send()");
                 break;
@@ -141,58 +174,47 @@ void protocol_server(int active_socket, state_machine *clstates, sqlite3 *db_use
 
 
         case STATE_SIGNUP_PASS:
+        {
             if (recv(active_socket, buf, MAX_DATA_SIZE-1, 0) == -1){
                 perror("Error. Server: recv()");
                 break;
             }
-            printf("New password %d: %s", active_socket, buf);
-
+            printf("sock %d new password: %s", active_socket, buf);
+            char pass[MAX_LOGIN_SIZE] = {"\0"}; // k o s t y l e
+            strncpy(pass, buf, strlen(buf)-1);
+           
             // Executing insertion to table
-
-            /*  Here goes segmentation fault. 
-                Check sqlite.org/cintro.html, 
-                mb answer will be there
-
-            char *sql;
-            sprintf(sql, "INSERT INTO users (login, password) VALUES ('%s', 'undefine');", buf); 
-            if (execute_db(db_users, "users.db", sql) == -1){
-                printf("Error. Insert to database users.db");
-                break;
-            } 
-            */
-
-            // TODO: rewrite, using func
             char *err_msg;
-            char *sql;
-            printf("Checking: %s", clstates[index].login);
-            sprintf(sql, "INSERT INTO users (login, password) VALUES ('%s', '%s');", clstates[index].login, buf) ; 
+            char sql[SQL_QUERY_SIZE];
+            sprintf(sql, "INSERT INTO users (login, password) VALUES ('%s', '%s');", clstates[index].login, pass); 
             int handle = sqlite3_exec(db_users, sql, 0, 0, &err_msg); 
             if (handle != SQLITE_OK){
                 fprintf(stderr, "SQL error: %s\n", err_msg);
-                sqlite3_close(db_users);
                 break;
-            }
-            
+            } 
+
             printf("New profile created successfully\n");
-            sprintf(msg, "Success! Welcome to the common room\n");
+            sprintf(msg, "\nSuccess! \nWelcome to common room!\n" 
+                         "Type /help to see all available commands\n\n");
             if (send(active_socket, msg, MAX_DATA_SIZE-1, 0) == -1){
                 perror("Error. Server: send()");
                 break;
             }
             clstates[index].state = STATE_COMMONROOM;
+            push(commonList, active_socket);
             break;
             /* End of case STATE_SIGNUP_PASS */
-
+        }
 
         case STATE_LOGIN: 
             if (recv(active_socket, buf, MAX_DATA_SIZE-1, 0) == -1){
                 perror("Error. Server: recv()");
                 break;
             }
-            printf("Login %d: %s", active_socket, buf); 
-            strcpy(clstates[index].login, buf);
+            printf("sock %d login: %s", active_socket, buf); 
+            strncpy(clstates[index].login, buf, strlen(buf)-1);
 
-            sprintf(msg, "Please, write password:\t");
+            sprintf(msg, "Please, write password: ");
             if (send(active_socket, msg, MAX_DATA_SIZE-1, 0) == -1){
                 perror("Error. Srever: send()");
                 break;
@@ -201,23 +223,49 @@ void protocol_server(int active_socket, state_machine *clstates, sqlite3 *db_use
             break;
             /* End of case STATE_LOGIN */
 
+
         case STATE_PASSWORD:
+        {
             if (recv(active_socket, buf, MAX_DATA_SIZE-1, 0) == -1){
                 perror("Error. Server: recv()");
                 exit(1);
             }
-            printf("Password %d: %s", active_socket, buf); 
-            /* SELECT * FROM users.db... compare pass and login
-                if incorrect - send error msg, break;
-            */
-            clstates[index].state = STATE_COMMONROOM;
+            printf("sock %d password: %s", active_socket, buf); 
+            char pass[MAX_LOGIN_SIZE] = {"\0"}; // k o s t y l e
+            strncpy(pass, buf, strlen(buf)-1);
+            
+            // Executing acceptance of user
+            char sql[SQL_QUERY_SIZE];
+            sqlite3_stmt *stmt;
+            sprintf(sql, "SELECT * FROM users WHERE login = '%s' AND password = '%s';", clstates[index].login, pass); 
+            sqlite3_prepare_v2(db_users, sql, -1, &stmt, NULL); 
+            sqlite3_step(stmt);
+            if(sqlite3_column_text(stmt, 1) == NULL){
+                printf("Unknown profile\n");
+                sprintf(msg, "\nWrong login or password\nPlease, sign up or log in\n");
+                if (send(active_socket, msg, MAX_DATA_SIZE-1, 0) == -1){
+                    perror("Error. Server: send()");
+                    break;
+                }
+                strcpy(clstates[index].login, "\0");
+                clstates[index].state = STATE_START;
+                sqlite3_finalize(stmt);
+                break;
+            } 
+            sqlite3_finalize(stmt);
 
-            sprintf(msg, "\nCorrect.\nType /help to see all available commands\n"); 
+            printf("%s logged in\n", clstates[index].login);
+            sprintf(msg, "\nCorrect.\nWelcome to common room!\n" 
+                         "Type /help to see all available commands\n\n");
             if (send(active_socket, msg, MAX_DATA_SIZE-1, 0) == -1){
                 perror("Error. Server: send()");
-            }
+                break;
+            } 
+            clstates[index].state = STATE_COMMONROOM;
+            push(commonList, active_socket);
             break;
             /* End of case STATE_PASSWORD */
+        }
 
         case STATE_COMMONROOM: 
             if (recv(active_socket, buf, MAX_DATA_SIZE-1, 0) == -1){
@@ -225,87 +273,139 @@ void protocol_server(int active_socket, state_machine *clstates, sqlite3 *db_use
             }
             // if msg is command
             if (strncmp(buf, "/", 1) == 0){
-                clstates[index].state = get_cmd_type(buf);
-
-                if (clstates[index].state == -1){
-                    sprintf(msg, "Unknown command ");
-                    printf("%d: %s\n", active_socket, msg);
-                    if (send(active_socket, msg, MAX_DATA_SIZE-1, 0) == -1){
-                        perror("Error. Server: send()");
-                    }
+                clstates[index].state = get_cmd_type(buf); 
+                //rewrite as a function
+                switch (clstates[index].state){
+                case STATE_HELP:
+                    state_help_info(active_socket);
                     clstates[index].state = STATE_COMMONROOM;
                     break;
-                }
-
-                if (clstates[index].state == STATE_HELP){ 
-                    sprintf(msg, "\nList of commands:\n/help\n" 
-                                 "/list - list of all available chatrooms\n" 
-                                 "/connect <to> - connect to chatroom\n" 
-                                 "/exit - exit chatroom\n" 
-                                 "/logout\n");
-                    if (send(active_socket, msg, MAX_DATA_SIZE-1, 0) == -1){
-                        perror("Error. Server: send()");
-                    }
+                case STATE_ROOMLIST:
+                    state_roomlist_info(active_socket);
                     clstates[index].state = STATE_COMMONROOM;
                     break;
-                }
-
-                if (clstates[index].state  == STATE_LIST){ 
-                    sprintf(msg, "\nList of available rooms:");
-                    /* 
-                     * TODO: Think about place, where info about room
-                     * will be held. Dunno, if it will be another structure
-                     * or another DB
-                     */
-                    if (send(active_socket, msg, MAX_DATA_SIZE-1, 0) == -1){
+                case STATE_UNKNOWN:
+                    state_unknown_info(active_socket);
+                    clstates[index].state = STATE_COMMONROOM;
+                    break;
+                case STATE_ALPHA:
+                    sprintf(msg, "\nWelcome to alpha room\n");
+                    if (write(active_socket, msg, strlen(msg)+1) == -1){
                         perror("Error. Server: send()");
                     }
-                    clstates[index].state = STATE_COMMONROOM;
+                    delete_node(commonList, active_socket);
+                    push(alphaList, active_socket);
+                    break;
+                // Rewrite this. Think about architecture
+                case STATE_LOGOUT:
+                    sprintf(msg, "\nYou logged out.\nType /signup or /login to continue...\n");
+                    if (write(active_socket, msg, strlen(msg)+1) == -1){
+                        perror("Error. Server: send()");
+                    }
+                    clstates[index].state = STATE_START;
+                    memset(clstates[index].login, '\0', MAX_LOGIN_SIZE); 
+                    delete_node(commonList, active_socket);
+                    break;
+                    
+                default:
+                    if(is_authorization_state(clstates[index].state) == 0){
+                        state_wrongcmd_info(active_socket);
+                        clstates[index].state = STATE_COMMONROOM;
+                    }
                     break;
                 }
             }
             // if it's just regular msg
             else {
-                sprintf(msg, "%d: %s", active_socket, buf);
-                printf("%s", msg);
-                for (int j = 0; j < MAX_CONNECT; j++){
-                    if (clstates[j].sockfd== active_socket){
-                        continue;
-                    }
-                    else if (clstates[j].sockfd == -1){
+                sprintf(msg, "%s: %s", clstates[index].login, buf);
+                printf("%s", msg);                
+                struct Node *cursor = *commonList;
+                while (cursor != NULL){
+                    if (cursor->data == active_socket){
+                        cursor = cursor->next;
                         continue;
                     }
                     else {
-                        // definitely should be rewritten
-                        if (clstates[j].state != STATE_START && 
-                            clstates[j].state != STATE_LOGIN &&
-                            clstates[j].state != STATE_PASSWORD &&
-                            clstates[j].state != STATE_SIGNUP && 
-                            clstates[j].state != STATE_SIGNUP_PASS) {
-                            if (send(clstates[j].sockfd, msg, MAX_DATA_SIZE-1, 0) == -1){
-                                perror("Error. Server: send()");
-                            }
-                        }
+                        if (send(cursor->data, msg, MAX_DATA_SIZE-1, 0) == -1){
+                            perror("Error. Server: send()123");
+                        } 
                     }
-                } 
+                    cursor = cursor->next;
+                }
             }
             break;
             /* End of case STATE_COMMONROOM */
 
-        /*
-         * TODO: write scenario for other cases
-         */
-        case STATE_CONNECT:
-            break;
+        case STATE_ALPHA: 
+            if (recv(active_socket, buf, MAX_DATA_SIZE-1, 0) == -1){
+                perror("Error. Server: recv()");
+            }
+            // if msg is command
+            if (strncmp(buf, "/", 1) == 0){
+                clstates[index].state = get_cmd_type(buf); 
+                //rewrite as a function
+                switch (clstates[index].state){
+                case STATE_HELP:
+                    state_help_info(active_socket);
+                    clstates[index].state = STATE_COMMONROOM;
+                    break;
+                case STATE_ROOMLIST:
+                    state_roomlist_info(active_socket);
+                    clstates[index].state = STATE_COMMONROOM;
+                    break;
+                case STATE_UNKNOWN:
+                    state_unknown_info(active_socket);
+                    clstates[index].state = STATE_COMMONROOM;
+                    break;
+                case STATE_COMMONROOM:
+                    sprintf(msg, "\nWelcome to common room\n");
+                    if (write(active_socket, msg, strlen(msg)+1) == -1){
+                        perror("Error. Server: send()");
+                    }
+                    delete_node(alphaList, active_socket);
+                    push(commonList, active_socket);
+                    break;
+                // Rewrite this. Think about architecture
+                case STATE_LOGOUT:
+                    sprintf(msg, "\nYou logged out.\nType /signup or /login to continue...\n");
+                    if (write(active_socket, msg, strlen(msg)+1) == -1){
+                        perror("Error. Server: send()");
+                    }
+                    clstates[index].state = STATE_START;
+                    memset(clstates[index].login, '\0', MAX_LOGIN_SIZE); 
+                    delete_node(alphaList, active_socket);
+                    break;
 
-        case STATE_CHATROOM:
+                default:
+                    if(is_authorization_state(clstates[index].state) == 0){
+                        state_wrongcmd_info(active_socket);
+                        clstates[index].state = STATE_COMMONROOM;
+                    }
+                    break;
+                }
+            }
+            // if it's just regular msg
+            else {
+                sprintf(msg, "alpha|%s: %s", clstates[index].login, buf);
+                printf("%s", msg);                
+                struct Node *cursor = *alphaList;
+                while (cursor != NULL){
+                    if (cursor->data == active_socket){
+                        cursor = cursor->next;
+                        continue;
+                    }
+                    else {
+                        if (send(cursor->data, msg, MAX_DATA_SIZE-1, 0) == -1){
+                            perror("Error. Server: send()123");
+                        } 
+                    }
+                    cursor = cursor->next;
+                }
+            }
             break;
-
-        case STATE_QUIT:
-            break;
+            /* End of case STATE_ALPHA */
 
         case STATE_LOGOUT:
             break;
-
     }
 }

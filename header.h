@@ -23,22 +23,35 @@
 #define LISTENQ 100
 #define MAX_CONNECT 100
 #define MAX_DATA_SIZE 256
+#define MAX_LOGIN_SIZE 32
+#define SQL_QUERY_SIZE 1024
 
-typedef enum STATE {
+typedef struct Node { 
+  int data; 
+  struct Node *next; 
+} node;
+
+void push(node **head_ref, int new_data) ;
+void append(node **head_ref, int new_data);
+void print_list(node *node);
+void delete_node(node **head_ref, int key);
+
+typedef enum STATE { 
   STATE_UNKNOWN = -1, STATE_START, STATE_LOGIN, STATE_PASSWORD, 
-  STATE_SIGNUP, STATE_SIGNUP_PASS, STATE_COMMONROOM, STATE_HELP,
-  STATE_LIST, STATE_CONNECT, STATE_LOGOUT, STATE_EXIT, STATE_CHATROOM
+  STATE_SIGNUP, STATE_SIGNUP_PASS, STATE_HELP, STATE_ROOMLIST,
+  STATE_LOGOUT, STATE_COMMONROOM, STATE_ALPHA, STATE_BETA
 } state_status; 
 
-typedef struct state_machine{
+typedef struct state_machine {
   state_status state;
   int sockfd;
-  char login[MAX_DATA_SIZE];
+  char login[MAX_LOGIN_SIZE];
 } state_machine;
 
-
 state_status get_cmd_type(char *cmd);
-void protocol_server(int sendingSockfd, int *clsock, state_machine *states,
-                 sqlite3 *db, char *buf, char *msg);
-
+state_status get_room(char *cmd);
+void protocol_server(int sendingSockfd, state_machine *states, sqlite3 *db,
+                      node **commonList, node **alphaList);
+int is_authorization_state(state_status clstate);
 int execute_db(sqlite3 *db_ptr, char *name, char *sql); 
+

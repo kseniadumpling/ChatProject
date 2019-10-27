@@ -10,16 +10,6 @@ static void *get_in_addr(struct sockaddr *sa) {
     return &(((struct sockaddr_in6*)sa)->sin6_addr);
 }
 
-
-/*
- * Turning socket into non-blocking mode
- */
-static void setnonblocking(int fd) {
-	int flag = fcntl(fd, F_GETFL, 0);
-	fcntl(fd, F_SETFL, flag | O_NONBLOCK);
-}
-
-
 /*
  * Main func of socket's connection
  * Returning: sockfd in correct case, -1 in error case
@@ -127,13 +117,6 @@ int main(int argc, char *argv[]) {
     if ((sockfd = connect_to_server(argv)) == -1){
         exit(1);
     }
-    
-    // Creating pipe
-    int pipefd[2];
-    if (pipe(pipefd) == -1){
-        perror("Error. Client: pipe");
-        exit(1);
-    }
 
     // Epoll tuning
     int epollfd;
@@ -158,7 +141,7 @@ int main(int argc, char *argv[]) {
             memset(buf, '\0', MAX_DATA_SIZE);
             // if server send smth:
             if (evlist[i].data.fd == sockfd){
-                res = recv(sockfd, buf, MAX_DATA_SIZE-1, 0);
+                res = read(sockfd, buf, MAX_DATA_SIZE-1);
                 if (res == -1){
                     perror("Error. Client: recv()");
                     exit(1); 
@@ -184,7 +167,7 @@ int main(int argc, char *argv[]) {
                         working = 0;
                     }
                     else {
-                        if (send(sockfd, buf, MAX_DATA_SIZE-1, 0) == -1) {
+                        if (write(sockfd, buf, strlen(buf)+1) == -1) {
                             perror("Error. Client: send");
                             exit(1);
                         }
